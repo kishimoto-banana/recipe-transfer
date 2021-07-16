@@ -1,0 +1,16 @@
+version: '3'
+services:
+  transfer:
+    build:
+      context: .
+    volumes:
+    - ./data:/app/data
+    secrets:
+        - firebase_admin_cred
+    environment: 
+        - firebase_cred_path=/run/secrets/firebase_admin_cred
+    command: make transfer
+
+secrets:
+    firebase_admin_cred:
+        file: ./firebase-admin.json
