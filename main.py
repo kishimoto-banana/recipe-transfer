@@ -8,8 +8,8 @@ import pandas as pd
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-BATCH_SIZE = 500
-WRITE_UPPER_LIMIT = 10000
+BATCH_SIZE = 100
+WRITE_UPPER_LIMIT = 2000
 FIREBASE_CRED_PATH = os.environ.get("firebase_cred_path", "firebase-admin.json")
 
 
@@ -18,7 +18,7 @@ firebase_admin.initialize_app(cred)
 
 db = firestore.client()
 collection = db.collection("recipes")
-batch = db.batch()
+seasoning_collection = db.collection("seasonings")
 
 
 @dataclass
@@ -36,8 +36,9 @@ def write_recipe():
         writed_urls = set(f.read().splitlines())
 
     # 調味料リスト
-    seasoning_df = pd.read_csv("data/seasoning.csv")
-    seasonings = set(seasoning_df["name"].tolist())
+    seasonings = set()
+    for seasoning in seasoning_collection.stream():
+        seasonings.add(seasoning.to_dict()["name"])
 
     # 名寄せ
     norm_df = pd.read_csv("data/word_normalize.csv")
@@ -63,25 +64,27 @@ def write_recipe():
         norm_recipes.append(raw_recipe)
 
     recipes = [
-        Recipe(
-            recipe["url"],
-            recipe["title"],
-            [seasoning for seasoning in recipe["seasonings"]],
-        )
+        {
+            "url": recipe["url"],
+            "title": recipe["title"],
+        }
+        | {s: True if s in recipe["seasonings"] else False for s in seasonings}
         for recipe in raw_recipes
         if recipe["url"] not in writed_urls
     ]
 
+    batch = db.batch()
     for counter, idx in enumerate(range(0, len(recipes), BATCH_SIZE)):
         batch_num = (len(recipes) - 1) // BATCH_SIZE + 1
         print(f"process [{counter+1}/{batch_num}]")
         for recipe in recipes[idx : idx + BATCH_SIZE]:
             batch.set(
                 collection.document(),
-                asdict(recipe),
+                recipe,
             )
-            writed_urls.add(recipe.url)
+            writed_urls.add(recipe["url"])
         batch.commit()
+        batch = db.batch()
 
         with open("data/writed_urls.txt", "w") as f:
             f.write("\n".join(writed_urls))
